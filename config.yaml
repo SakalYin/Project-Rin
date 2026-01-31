@@ -1,0 +1,43 @@
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║                     Project Rin — Configuration                     ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+# ── llama.cpp server (auto-managed subprocess) ──────────────────────────
+server:
+  enabled: true                        # set false to manage the server yourself
+  executable: "llama.ccp/llama-server.exe"
+  model_path: "models/Qwen3-8B-Q5_K_M.gguf"                       # REQUIRED — path to your .gguf model
+  context_size: 16384                   # -c   total context window
+  n_predict: 4096                       # -n   max completion tokens per reply
+  gpu_layers: -1                       # -ngl (-1 = offload all layers to GPU)
+  port: 8080
+  host: "127.0.0.1"
+  extra_args: []                       # any additional CLI flags
+
+# ── LLM API settings ───────────────────────────────────────────────────
+# base_url is auto-derived from server.host / server.port when server.enabled
+llm:
+  api_key: "not-needed"                # llama.cpp doesn't require a real key
+  model: "local-model"                 # placeholder; llama.cpp ignores this
+  temperature: 1.1                     # high for chaotic replies
+  timeout: 30.0                        # seconds before giving up
+  max_retries: 3                       # retry on empty LLM responses
+  # max_tokens:                        # leave unset to use server.n_predict
+
+# ── TTS (kokoro-onnx) ──────────────────────────────────────────────────
+tts:
+  model_path: "models/kokoro-v1.0.onnx"
+  voices_path: "models/voices-v1.0.bin"
+  voice: "af_heart"                    # American female, warm/young
+  speed: 1.1                           # slightly fast for perky energy
+  lang: "en-us"
+  sample_rate: 24000
+
+# ── Database ────────────────────────────────────────────────────────────
+database:
+  path: "data/chat_history.db"
+  history_limit: 20                    # past messages fed to the LLM
+
+# ── Streaming ───────────────────────────────────────────────────────────
+streaming:
+  min_sentence_chars: 12               # don't TTS tiny fragments
