@@ -2,42 +2,68 @@
 # ║                     Project Rin — Configuration                     ║
 # ╚══════════════════════════════════════════════════════════════════════╝
 
-# ── llama.cpp server (auto-managed subprocess) ──────────────────────────
-server:
-  enabled: true                        # set false to manage the server yourself
-  executable: "llama.ccp/llama-server.exe"
-  model_path: "models/Qwen3-8B-Q5_K_M.gguf"                       # REQUIRED — path to your .gguf model
-  context_size: 16384                   # -c   total context window
-  n_predict: 4096                       # -n   max completion tokens per reply
-  gpu_layers: -1                       # -ngl (-1 = offload all layers to GPU)
-  port: 8080
-  host: "127.0.0.1"
-  extra_args: []                       # any additional CLI flags
-
-# ── LLM API settings ───────────────────────────────────────────────────
-# base_url is auto-derived from server.host / server.port when server.enabled
+# ── LLM ───────────────────────────────────────────────────────────────
+# Engine-level keys: provider, max_retries
+# Everything else is passed to the selected provider.
 llm:
-  api_key: "not-needed"                # llama.cpp doesn't require a real key
-  model: "local-model"                 # placeholder; llama.cpp ignores this
-  temperature: 1.1                     # high for chaotic replies
-  timeout: 30.0                        # seconds before giving up
-  max_retries: 3                       # retry on empty LLM responses
-  # max_tokens:                        # leave unset to use server.n_predict
+  provider: "openai_compat"              # provider to use (see src/core/llm/providers/)
+  max_retries: 3                         # retry on empty LLM responses
 
-# ── TTS (kokoro-onnx) ──────────────────────────────────────────────────
+  # Provider-specific (openai_compat) ─────────────────────────────────
+  api_key: "not-needed"                  # llama.cpp doesn't require a real key
+  model: "local-model"                   # placeholder; llama.cpp ignores this
+  temperature: 1.1                       # high for chaotic replies
+  timeout: 30.0                          # seconds before giving up
+  # max_tokens:                          # leave unset to use server.n_predict
+
+  # llama.cpp server subprocess (openai_compat-specific)
+  server:
+    enabled: true                        # set false to manage the server yourself
+    executable: "llama.ccp/llama-server.exe"
+    model_path: "models/Qwen3-8B-Q5_K_M.gguf"
+    context_size: 16384                  # -c   total context window
+    n_predict: 4096                      # -n   max completion tokens per reply
+    gpu_layers: -1                       # -ngl (-1 = offload all layers to GPU)
+    port: 8080
+    host: "127.0.0.1"
+    extra_args: []                       # any additional CLI flags
+
+# ── TTS ───────────────────────────────────────────────────────────────
+# Engine-level keys: provider, sample_rate
+# Everything else is passed to the selected provider.
 tts:
+  provider: "kokoro"                     # provider to use (see src/core/tts/providers/)
+  sample_rate: 24000                     # playback sample rate
+
+  # Provider-specific (kokoro) ────────────────────────────────────────
   model_path: "models/kokoro-v1.0.onnx"
   voices_path: "models/voices-v1.0.bin"
-  voice: "af_heart"                    # American female, warm/young
-  speed: 1.1                           # slightly fast for perky energy
+  voice: "af_heart"                      # American female, warm/young
+  speed: 1.0                             # slightly fast for perky energy
   lang: "en-us"
-  sample_rate: 24000
 
-# ── Database ────────────────────────────────────────────────────────────
+# ── STT ───────────────────────────────────────────────────────────────
+# Engine-level keys: provider, enabled, sample_rate, silence_duration, max_duration, vad_threshold
+# Everything else is passed to the selected provider.
+stt:
+  provider: "faster_whisper"             # provider to use (see src/core/stt/providers/)
+  enabled: true                          # set false to disable voice input entirely
+  sample_rate: 16000                     # recording sample rate (Whisper expects 16 kHz)
+  silence_duration: 1.5                  # seconds of silence → end of utterance
+  max_duration: 30.0                     # max buffer before forced processing (seconds)
+  vad_threshold: 0.65                    # Silero VAD sensitivity (0-1, higher = less sensitive)
+
+  # Provider-specific (faster_whisper) ────────────────────────────────
+  model: "distil-medium.en"              # HuggingFace model (auto-downloaded)
+  device: "cuda"                         # "cuda" for GPU, "cpu" for CPU
+  compute_type: "float16"                # float16 for GPU, int8 for CPU
+  language: "en"                         # forced language (skips auto-detect)
+
+# ── Database ──────────────────────────────────────────────────────────
 database:
   path: "data/chat_history.db"
-  history_limit: 20                    # past messages fed to the LLM
+  history_limit: 20                      # past messages fed to the LLM
 
-# ── Streaming ───────────────────────────────────────────────────────────
+# ── Streaming ─────────────────────────────────────────────────────────
 streaming:
-  min_sentence_chars: 12               # don't TTS tiny fragments
+  min_sentence_chars: 12                 # don't TTS tiny fragments

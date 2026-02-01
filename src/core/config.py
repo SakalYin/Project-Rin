@@ -1,6 +1,13 @@
 """
 YAML configuration loader for Project Rin.
-Reads config.yaml from the project root and exposes values as typed dataclasses.
+
+Each subsystem (LLM, TTS, STT) has:
+  - A ``provider`` key selecting the backend implementation
+  - Engine-level keys consumed by the engine (typed fields below)
+  - Everything else flows into ``provider_config`` as a plain dict
+
+This means adding a new provider with novel config keys requires
+zero changes to this file.
 """
 
 from __future__ import annotations
@@ -8,45 +15,39 @@ from __future__ import annotations
 import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-@dataclass
-class ServerConfig:
-    """llama.cpp server subprocess settings."""
-    enabled: bool = True
-    executable: str = "llama.ccp/llama-server.exe"
-    model_path: str = ""               # REQUIRED — path to .gguf file
-    context_size: int = 2048            # -c  (total context window)
-    n_predict: int = 512                # --n-predict  (max completion tokens)
-    gpu_layers: int = -1                # -ngl  (-1 = offload everything)
-    port: int = 8080
-    host: str = "127.0.0.1"
-    extra_args: list[str] = field(default_factory=list)
-
+# ── Subsystem configs ────────────────────────────────────────────────────
 
 @dataclass
 class LLMConfig:
-    """OpenAI-compatible API settings (pointed at the llama.cpp server)."""
-    base_url: str = "http://localhost:8080/v1"
-    api_key: str = "not-needed"
-    model: str = "local-model"
-    temperature: float = 1.1
-    max_tokens: Optional[int] = None    # None = let the server's n_predict decide
-    timeout: float = 30.0
+    """LLM engine + provider configuration."""
+    provider: str = "openai_compat"
     max_retries: int = 3
+    provider_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class TTSConfig:
-    model_path: str = "models/kokoro-v1.0.onnx"
-    voices_path: str = "models/voices-v1.0.bin"
-    voice: str = "af_heart"
-    speed: float = 1.1
-    lang: str = "en-us"
-    sample_rate: int = 24000
+    """TTS engine + provider configuration."""
+    provider: str = "kokoro"
+    sample_rate: int = 24000              # used by engine for playback
+    provider_config: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class STTConfig:
+    """STT engine + provider configuration."""
+    provider: str = "faster_whisper"
+    enabled: bool = True
+    sample_rate: int = 16000              # recording sample rate
+    silence_duration: float = 1.5         # seconds of silence to end utterance
+    max_duration: float = 30.0            # max buffer before forced processing
+    vad_threshold: float = 0.65           # Silero VAD sensitivity (0-1)
+    provider_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -62,11 +63,48 @@ class StreamingConfig:
 
 @dataclass
 class AppConfig:
-    server: ServerConfig = field(default_factory=ServerConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
+    stt: STTConfig = field(default_factory=STTConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+# Engine-level keys for each subsystem — everything else is provider config.
+_LLM_ENGINE_KEYS = {"provider", "max_retries"}
+_TTS_ENGINE_KEYS = {"provider", "sample_rate"}
+_STT_ENGINE_KEYS = {
+    "provider", "enabled", "sample_rate",
+    "silence_duration", "max_duration",
+    "vad_threshold",
+}
+
+
+def _resolve_paths(d: dict[str, Any], keys: set[str] | None = None) -> None:
+    """Resolve values whose keys look like paths against PROJECT_ROOT."""
+    for key, val in list(d.items()):
+        if isinstance(val, str) and (
+            key.endswith("_path") or key == "executable"
+        ):
+            d[key] = str(PROJECT_ROOT / val)
+        elif isinstance(val, dict):
+            _resolve_paths(val)
+
+
+def _split_section(
+    raw: dict[str, Any], engine_keys: set[str]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a YAML section into engine kwargs and provider config."""
+    engine = {}
+    provider = {}
+    for k, v in raw.items():
+        if k in engine_keys:
+            engine[k] = v
+        else:
+            provider[k] = v
+    return engine, provider
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -74,31 +112,37 @@ def load_config(path: Path | None = None) -> AppConfig:
     config_path = path or PROJECT_ROOT / "config.yaml"
     cfg = AppConfig()
 
-    if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
+    if not config_path.exists():
+        return cfg
 
-        if "server" in raw:
-            cfg.server = ServerConfig(**raw["server"])
-        if "llm" in raw:
-            cfg.llm = LLMConfig(**raw["llm"])
-        if "tts" in raw:
-            cfg.tts = TTSConfig(**raw["tts"])
-        if "database" in raw:
-            cfg.database = DatabaseConfig(**raw["database"])
-        if "streaming" in raw:
-            cfg.streaming = StreamingConfig(**raw["streaming"])
+    with open(config_path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
 
-    # Resolve relative paths against project root
-    cfg.server.executable = str(PROJECT_ROOT / cfg.server.executable)
-    if cfg.server.model_path:
-        cfg.server.model_path = str(PROJECT_ROOT / cfg.server.model_path)
-    cfg.tts.model_path = str(PROJECT_ROOT / cfg.tts.model_path)
-    cfg.tts.voices_path = str(PROJECT_ROOT / cfg.tts.voices_path)
+    # ── LLM ──────────────────────────────────────────────────────
+    if "llm" in raw:
+        engine, provider = _split_section(raw["llm"], _LLM_ENGINE_KEYS)
+        _resolve_paths(provider)
+        cfg.llm = LLMConfig(**engine, provider_config=provider)
+
+    # ── TTS ──────────────────────────────────────────────────────
+    if "tts" in raw:
+        engine, provider = _split_section(raw["tts"], _TTS_ENGINE_KEYS)
+        _resolve_paths(provider)
+        cfg.tts = TTSConfig(**engine, provider_config=provider)
+
+    # ── STT ──────────────────────────────────────────────────────
+    if "stt" in raw:
+        engine, provider = _split_section(raw["stt"], _STT_ENGINE_KEYS)
+        _resolve_paths(provider)
+        cfg.stt = STTConfig(**engine, provider_config=provider)
+
+    # ── Database & Streaming (unchanged) ─────────────────────────
+    if "database" in raw:
+        cfg.database = DatabaseConfig(**raw["database"])
+    if "streaming" in raw:
+        cfg.streaming = StreamingConfig(**raw["streaming"])
+
+    # Resolve database path
     cfg.database.path = str(PROJECT_ROOT / cfg.database.path)
-
-    # Auto-derive llm.base_url from server config if server is enabled
-    if cfg.server.enabled:
-        cfg.llm.base_url = f"http://{cfg.server.host}:{cfg.server.port}/v1"
 
     return cfg

@@ -8,7 +8,14 @@ httpx>=0.25.0
 kokoro-onnx>=0.5.0
 onnxruntime>=1.20.1
 
-# Audio playback
+# STT engine (Whisper on GPU)
+faster-whisper>=1.0.0
+
+# VAD (Silero) + audio capture
+torch>=2.0.0
+pyaudio>=0.2.13
+
+# Audio playback & recording
 sounddevice>=0.4.6
 numpy>=1.24.0
 

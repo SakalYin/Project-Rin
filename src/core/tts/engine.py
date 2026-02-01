@@ -1,9 +1,8 @@
 """
-Kokoro-ONNX text-to-speech engine with sounddevice playback.
+TTS engine — wraps any TTSProvider with text cleaning, sentence splitting,
+and audio playback.
 
-Synthesis uses kokoro_onnx.Kokoro (v1.0 model files).
-Blocking calls (create / sd.play) are offloaded to a thread-pool executor
-so the async event loop stays responsive.
+This is the only TTS interface that app.py should use.
 """
 
 from __future__ import annotations
@@ -13,25 +12,21 @@ import logging
 import re
 import time
 from functools import partial
-
 import numpy as np
 import sounddevice as sd
 
-from src.core.config import AppConfig
+from src.core.tts.providers import get_tts_provider
 
 log = logging.getLogger(__name__)
 
 # ── Sentence splitting helpers ───────────────────────────────────────────
 
-# Split on sentence-ending punctuation followed by whitespace.
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?~])\s+")
 
-# Kaomoji / emote patterns that shouldn't be spoken.
 _KAOMOJI = re.compile(
     r"[\(（][\s]*[>≧≦╥ᗒᗣᗕ°▽TQOoUuXx;:'^,.*_\-\+~!?ಥ☆★♡♥ω\\/|]+"
     r"[^\)）]*[\)）]"
 )
-# Leftover decorative symbols.
 _UNSPEAKABLE = re.compile(r"[>:;()\[\]{}<>^_~=*#@|/\\]+")
 
 
@@ -73,40 +68,28 @@ def extract_sentences(buffer: str, min_chars: int = 12) -> tuple[list[str], str]
 # ── TTS Engine ───────────────────────────────────────────────────────────
 
 class TTSEngine:
-    """Wraps kokoro-onnx synthesis + sounddevice playback."""
+    """
+    Orchestrates a TTS provider.
 
-    def __init__(self, config: AppConfig) -> None:
+    Responsibilities (engine-level):
+      - Text cleaning (strip kaomoji, unspeakable symbols)
+      - Audio playback via sounddevice
+
+    Synthesis is delegated to the selected provider.
+    """
+
+    def __init__(self, config) -> None:
         self._cfg = config.tts
-        self._kokoro = None  # lazy-loaded on first speak()
+        provider_cls = get_tts_provider(self._cfg.provider)
+        self._provider = provider_cls(self._cfg.provider_config)
 
-    # ── lazy loading ─────────────────────────────────────────────────
+    async def initialize(self) -> None:
+        """Load the TTS provider's model."""
+        await self._provider.initialize()
 
-    def _ensure_loaded(self) -> None:
-        """Import and instantiate Kokoro on first use."""
-        if self._kokoro is not None:
-            return
-        try:
-            from kokoro_onnx import Kokoro
-        except ImportError:
-            raise RuntimeError(
-                "kokoro-onnx is not installed. Run:  pip install kokoro-onnx"
-            )
-        log.info("Loading Kokoro model from %s …", self._cfg.model_path)
-        self._kokoro = Kokoro(self._cfg.model_path, self._cfg.voices_path)
-        log.info("Kokoro model loaded.")
-
-    # ── blocking helpers (run in executor) ───────────────────────────
-
-    def _synthesize(self, text: str) -> tuple[np.ndarray, int]:
-        """Synchronous synthesis — run inside ``run_in_executor``."""
-        self._ensure_loaded()
-        samples, sr = self._kokoro.create(
-            text,
-            voice=self._cfg.voice,
-            speed=self._cfg.speed,
-            lang=self._cfg.lang,
-        )
-        return samples, sr
+    async def shutdown(self) -> None:
+        """Release provider resources."""
+        await self._provider.shutdown()
 
     @staticmethod
     def _play_audio(samples: np.ndarray, sample_rate: int) -> None:
@@ -114,14 +97,11 @@ class TTSEngine:
         sd.play(samples, samplerate=sample_rate)
         sd.wait()
 
-    # ── public async API ─────────────────────────────────────────────
-
     async def speak(self, text: str) -> None:
         """
-        Clean *text*, synthesize it with Kokoro, and play through speakers.
+        Clean *text*, synthesize via provider, and play through speakers.
 
-        Both synthesis and playback are offloaded to the default thread-pool
-        so the event loop is never blocked.
+        Both synthesis and playback are offloaded so the event loop stays free.
         """
         clean = _clean_for_speech(text)
         if not clean:
@@ -130,12 +110,10 @@ class TTSEngine:
 
         loop = asyncio.get_running_loop()
 
-        # ── synthesize ───────────────────────────────────────────────
+        # ── synthesize via provider ──────────────────────────────────
         t0 = time.perf_counter()
         try:
-            samples, sr = await loop.run_in_executor(
-                None, partial(self._synthesize, clean)
-            )
+            samples, sr = await self._provider.synthesize(clean)
         except Exception as e:
             log.error("TTS synthesis failed: %s", e)
             print(f"\n[TTS ERROR] synthesis failed: {e}")

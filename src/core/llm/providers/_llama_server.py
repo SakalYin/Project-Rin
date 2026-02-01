@@ -1,23 +1,17 @@
 """
 Manages the llama.cpp server as a child subprocess.
 
-Responsibilities:
-  - Build the CLI command from config
-  - Start the process and pipe its output to the logger
-  - Poll the /health endpoint until the server is ready
-  - Gracefully terminate on shutdown
+This is an internal module used by the ``openai_compat`` provider.
+It is NOT part of the public provider API.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 from pathlib import Path
 
 import httpx
-
-from src.core.config import AppConfig
 
 log = logging.getLogger(__name__)
 
@@ -28,46 +22,48 @@ _HEALTH_TIMEOUT = 120.0       # seconds before giving up on server start
 class LlamaServer:
     """Async context-manager that owns the llama-server process."""
 
-    def __init__(self, config: AppConfig) -> None:
-        self._cfg = config.server
-        self._health_url = f"http://{self._cfg.host}:{self._cfg.port}/health"
+    def __init__(self, config: dict) -> None:
+        self._cfg = config
+        host = config.get("host", "127.0.0.1")
+        port = config.get("port", 8080)
+        self._health_url = f"http://{host}:{port}/health"
         self._process: asyncio.subprocess.Process | None = None
         self._log_task: asyncio.Task | None = None
 
     # ── build command ────────────────────────────────────────────────
 
     def _build_cmd(self) -> list[str]:
-        exe = self._cfg.executable
-        if not Path(exe).exists():
+        exe = self._cfg.get("executable", "")
+        if not exe or not Path(exe).exists():
             raise FileNotFoundError(
                 f"llama-server executable not found: {exe}"
             )
-        if not self._cfg.model_path:
+        model_path = self._cfg.get("model_path", "")
+        if not model_path:
             raise ValueError(
                 "server.model_path is required in config.yaml "
                 "(path to your .gguf model file)"
             )
-        if not Path(self._cfg.model_path).exists():
+        if not Path(model_path).exists():
             raise FileNotFoundError(
-                f"Model file not found: {self._cfg.model_path}"
+                f"Model file not found: {model_path}"
             )
 
         cmd = [
             exe,
-            "-m", self._cfg.model_path,
-            "-c", str(self._cfg.context_size),
-            "-n", str(self._cfg.n_predict),
-            "-ngl", str(self._cfg.gpu_layers),
-            "--host", self._cfg.host,
-            "--port", str(self._cfg.port),
+            "-m", model_path,
+            "-c", str(self._cfg.get("context_size", 2048)),
+            "-n", str(self._cfg.get("n_predict", 512)),
+            "-ngl", str(self._cfg.get("gpu_layers", -1)),
+            "--host", self._cfg.get("host", "127.0.0.1"),
+            "--port", str(self._cfg.get("port", 8080)),
         ]
-        cmd.extend(self._cfg.extra_args)
+        cmd.extend(self._cfg.get("extra_args", []))
         return cmd
 
     # ── log forwarding ───────────────────────────────────────────────
 
     async def _forward_output(self) -> None:
-        """Read stderr from the server process and forward to our logger."""
         if self._process is None or self._process.stderr is None:
             return
         try:
@@ -81,7 +77,6 @@ class LlamaServer:
     # ── health polling ───────────────────────────────────────────────
 
     async def _wait_ready(self) -> None:
-        """Block until the server's /health endpoint returns 200."""
         elapsed = 0.0
         async with httpx.AsyncClient() as client:
             while elapsed < _HEALTH_TIMEOUT:
@@ -105,7 +100,6 @@ class LlamaServer:
     # ── lifecycle ────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        """Launch the server subprocess and wait until it's healthy."""
         cmd = self._build_cmd()
         log.info("Starting llama-server: %s", " ".join(cmd))
 
@@ -114,14 +108,12 @@ class LlamaServer:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        # Forward server logs in the background
         self._log_task = asyncio.create_task(self._forward_output())
 
         print("Waiting for llama-server to load model...", flush=True)
         await self._wait_ready()
 
     async def stop(self) -> None:
-        """Gracefully terminate the server."""
         if self._process is None:
             return
 
@@ -144,8 +136,6 @@ class LlamaServer:
 
         log.info("llama-server stopped.")
         self._process = None
-
-    # ── async context-manager ────────────────────────────────────────
 
     async def __aenter__(self) -> LlamaServer:
         await self.start()
