@@ -3,6 +3,7 @@ Conversation turn handler — orchestrates LLM, TTS, and DB.
 
 Handles:
   - LLM streaming with concurrent TTS playback
+  - Memory system integration (StatusManager + background updates)
   - Persisting messages to the database
   - UI output (GUI window or terminal)
 """
@@ -18,12 +19,28 @@ from src.service.llm.engine import LLMEngine
 from src.service.tts.engine import TTSEngine, extract_sentences
 from src.db.db_manager import ChatDatabase
 from src.core.config import AppConfig
+from src.utils.plugins.dynamic_personality import (
+    StatusManager,
+    update_memory_background,
+)
 
 if TYPE_CHECKING:
     from src.core.terminal_ui import TerminalUI
     from src.core.chat_window import AsyncChatWindow
 
 log = logging.getLogger(__name__)
+
+
+def _build_memory_context(status: StatusManager | None) -> str | None:
+    """Build the memory context to inject into system prompt."""
+    if status is None:
+        return None
+
+    # Just inject the current memory state (no instructions needed)
+    memory_block = status.format_for_prompt()
+    if memory_block:
+        log.debug("Memory context injected (%d chars)", len(memory_block))
+    return memory_block or None
 
 
 async def run_turn_with_window(
@@ -33,16 +50,22 @@ async def run_turn_with_window(
     db: ChatDatabase,
     config: AppConfig,
     window: AsyncChatWindow,
+    status: StatusManager | None = None,
 ) -> str:
     """
     Run one conversation turn with GUI window output.
 
     Streams LLM tokens while concurrently playing TTS for finished sentences.
     A third task keeps the GUI responsive during playback.
-    Returns the full assistant reply.
+    Memory is updated via background LLM call after the turn.
     """
     history = await db.get_history()
     history.append({"role": "user", "content": user_input})
+
+    # Build memory context for LLM
+    memory_context = _build_memory_context(status)
+    if memory_context:
+        log.info("[MEMORY] Injecting %d chars into system prompt", len(memory_context))
 
     sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
     full_reply_parts: list[str] = []
@@ -52,7 +75,9 @@ async def run_turn_with_window(
         buffer = ""
         try:
             async for chunk in llm.generate_response(
-                history, max_retries=config.llm.max_retries
+                history,
+                max_retries=config.llm.max_retries,
+                memory_context=memory_context,
             ):
                 full_reply_parts.append(chunk)
                 window.append_ai_chunk(chunk)
@@ -102,11 +127,21 @@ async def run_turn_with_window(
 
     elapsed = time.perf_counter() - t0
     full_reply = "".join(full_reply_parts)
-    log.info("Turn complete in %.2fs | reply=%r", elapsed, full_reply)
 
-    # Persist to database
+    log.info("Turn complete in %.2fs | reply=%r", elapsed, full_reply[:100])
+
+    # Persist messages to database
     await db.save_message("user", user_input)
     await db.save_message("assistant", full_reply)
+
+    # Update memory in background (non-blocking)
+    if status and config.persona.enabled:
+        if config.persona.update_in_background:
+            asyncio.create_task(
+                update_memory_background(user_input, full_reply, status, llm)
+            )
+        else:
+            await update_memory_background(user_input, full_reply, status, llm)
 
     return full_reply
 
@@ -118,15 +153,19 @@ async def run_turn_with_ui(
     db: ChatDatabase,
     config: AppConfig,
     ui: TerminalUI,
+    status: StatusManager | None = None,
 ) -> str:
     """
     Run one conversation turn with terminal UI output.
 
     Streams LLM tokens while concurrently playing TTS for finished sentences.
-    Returns the full assistant reply.
+    Memory is updated via background LLM call after the turn.
     """
     history = await db.get_history()
     history.append({"role": "user", "content": user_input})
+
+    # Build memory context for LLM
+    memory_context = _build_memory_context(status)
 
     sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
     full_reply_parts: list[str] = []
@@ -135,7 +174,9 @@ async def run_turn_with_ui(
         buffer = ""
         try:
             async for chunk in llm.generate_response(
-                history, max_retries=config.llm.max_retries
+                history,
+                max_retries=config.llm.max_retries,
+                memory_context=memory_context,
             ):
                 full_reply_parts.append(chunk)
                 ui.print_ai_chunk(chunk)
@@ -170,11 +211,21 @@ async def run_turn_with_ui(
 
     elapsed = time.perf_counter() - t0
     full_reply = "".join(full_reply_parts)
-    log.info("Turn complete in %.2fs | reply=%r", elapsed, full_reply)
 
-    # Persist to database
+    log.info("Turn complete in %.2fs | reply=%r", elapsed, full_reply[:100])
+
+    # Persist messages to database
     await db.save_message("user", user_input)
     await db.save_message("assistant", full_reply)
+
+    # Update memory in background (non-blocking)
+    if status and config.persona.enabled:
+        if config.persona.update_in_background:
+            asyncio.create_task(
+                update_memory_background(user_input, full_reply, status, llm)
+            )
+        else:
+            await update_memory_background(user_input, full_reply, status, llm)
 
     return full_reply
 
@@ -185,6 +236,7 @@ async def run_turn(
     tts: TTSEngine,
     db: ChatDatabase,
     config: AppConfig,
+    status: StatusManager | None = None,
 ) -> str:
     """
     Run one conversation turn (plain output, no UI).
@@ -194,6 +246,9 @@ async def run_turn(
     history = await db.get_history()
     history.append({"role": "user", "content": user_input})
 
+    # Build memory context for LLM
+    memory_context = _build_memory_context(status)
+
     sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
     full_reply_parts: list[str] = []
 
@@ -201,7 +256,9 @@ async def run_turn(
         buffer = ""
         try:
             async for chunk in llm.generate_response(
-                history, max_retries=config.llm.max_retries
+                history,
+                max_retries=config.llm.max_retries,
+                memory_context=memory_context,
             ):
                 full_reply_parts.append(chunk)
                 print(chunk, end="", flush=True)
@@ -236,10 +293,20 @@ async def run_turn(
 
     elapsed = time.perf_counter() - t0
     full_reply = "".join(full_reply_parts)
-    log.info("Turn complete in %.2fs | reply=%r", elapsed, full_reply)
 
-    # Persist to database
+    log.info("Turn complete in %.2fs | reply=%r", elapsed, full_reply[:100])
+
+    # Persist messages to database
     await db.save_message("user", user_input)
     await db.save_message("assistant", full_reply)
+
+    # Update memory in background (non-blocking)
+    if status and config.persona.enabled:
+        if config.persona.update_in_background:
+            asyncio.create_task(
+                update_memory_background(user_input, full_reply, status, llm)
+            )
+        else:
+            await update_memory_background(user_input, full_reply, status, llm)
 
     return full_reply

@@ -62,12 +62,21 @@ class StreamingConfig:
 
 
 @dataclass
+class PersonaConfig:
+    """Dynamic AI personality configuration."""
+    enabled: bool = True
+    state_file: str = "src/utils/plugins/dynamic_personality/status.txt"
+    update_in_background: bool = True
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     stt: STTConfig = field(default_factory=STTConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
+    persona: PersonaConfig = field(default_factory=PersonaConfig)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -141,8 +150,11 @@ def load_config(path: Path | None = None) -> AppConfig:
         cfg.database = DatabaseConfig(**raw["database"])
     if "streaming" in raw:
         cfg.streaming = StreamingConfig(**raw["streaming"])
+    if "persona" in raw:
+        cfg.persona = PersonaConfig(**raw["persona"])
 
-    # Resolve database path
+    # Resolve paths
     cfg.database.path = str(PROJECT_ROOT / cfg.database.path)
+    cfg.persona.state_file = str(PROJECT_ROOT / cfg.persona.state_file)
 
     return cfg

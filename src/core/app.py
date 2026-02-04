@@ -4,12 +4,13 @@ Main async loop — ties engines, orchestrator and chat persistence together.
 Architecture:
   0. LLM engine starts (provider may launch a subprocess, etc.)
   1. TTS + STT engines initialize (load models)
-  2. STT begins active background listening (VAD loop)
-  3. User speaks OR types in GUI window — whichever comes first
-  4. Orchestrator: LLM streams → sentences queued → TTS plays
-  5. Full reply is saved to the database
-  6. Loop until window closed or Ctrl+C
-  7. Engines shut down gracefully
+  2. Memory system loads (persistent AI context)
+  3. STT begins active background listening (VAD loop)
+  4. User speaks OR types in GUI window — whichever comes first
+  5. Orchestrator: LLM streams → sentences queued → TTS plays
+  6. Memory tags processed, full reply saved to database
+  7. Loop until window closed or Ctrl+C
+  8. Engines shut down gracefully
 
 The chat UI runs in a separate GUI window.
 Logging output goes to the terminal and log file.
@@ -28,6 +29,7 @@ from src.service.tts.engine import TTSEngine
 from src.service.stt.engine import STTEngine
 from src.db.db_manager import ChatDatabase
 from src.orchestrator.conversation import run_turn_with_window
+from src.utils.plugins.dynamic_personality.status_manager import StatusManager
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +42,14 @@ async def _chat_loop(config: AppConfig, llm: LLMEngine) -> None:
     db = ChatDatabase(config)
     await db.initialize()
     log.info("Database initialized")
+
+    # Initialize persona system (if enabled)
+    status = None
+    if config.persona.enabled:
+        status = StatusManager(filepath=config.persona.state_file)
+        log.info("Persona system loaded from: %s", config.persona.state_file)
+    else:
+        log.info("Persona system disabled")
 
     # Show session selection dialog
     sessions = await db.get_sessions()
@@ -110,8 +120,10 @@ async def _chat_loop(config: AppConfig, llm: LLMEngine) -> None:
             # Show user message in window
             window.append_user_message(user_input)
 
-            # Run conversation turn
-            await run_turn_with_window(user_input, llm, tts, db, config, window)
+            # Run conversation turn with memory system
+            await run_turn_with_window(
+                user_input, llm, tts, db, config, window, status
+            )
 
     except KeyboardInterrupt:
         log.info("Interrupted by user")

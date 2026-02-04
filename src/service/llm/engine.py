@@ -22,6 +22,7 @@ class LLMEngine:
 
     Responsibilities (engine-level):
       - Prepend the system prompt to every request
+      - Optionally inject memory context into system prompt
       - Retry on empty responses (known llama.cpp quirk)
       - Lifecycle management (start/stop the provider)
 
@@ -54,15 +55,27 @@ class LLMEngine:
         self,
         messages: list[dict[str, str]],
         max_retries: int | None = None,
+        memory_context: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Prepend system prompt, stream via provider, retry on empty.
 
+        Args:
+            messages: Conversation history (user/assistant messages)
+            max_retries: Override default retry count
+            memory_context: Optional memory block to append to system prompt
+
         Yields text chunks to the caller.
         """
         max_retries = max_retries or self._cfg.max_retries
+
+        # Build system prompt with optional memory
+        system_content = SYSTEM_PROMPT
+        if memory_context:
+            system_content = f"{SYSTEM_PROMPT}\n\n{memory_context}"
+
         full_messages = [
-            {"role": "system", "content": SYSTEM_PROMPT}
+            {"role": "system", "content": system_content}
         ] + messages
 
         for attempt in range(1, max_retries + 1):

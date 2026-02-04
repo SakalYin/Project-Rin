@@ -22,7 +22,7 @@ llm:
   server:
     enabled: true                        # set false to manage the server yourself
     executable: "llama.ccp/llama-server.exe"
-    model_path: "models/nvidia_Llama-3.1-Nemotron-Nano-8B-v1-Q5_K_M.gguf"
+    model_path: "models/Llama-3.1-8B-Instruct-UD-Q4_K_XL.gguf"
     context_size: 16384                  # -c   total context window
     n_predict: 4096                      # -n   max completion tokens per reply
     gpu_layers: -1                       # -ngl (-1 = offload all layers to GPU)
@@ -69,3 +69,10 @@ database:
 # ── Streaming ─────────────────────────────────────────────────────────
 streaming:
   min_sentence_chars: 12                 # don't TTS tiny fragments
+
+# ── Dynamic Personality ─────────────────────────────────────────────────
+# AI personality state tracking (mood, impression, relationship, notes)
+persona:
+  enabled: true                          # set false to disable persona system
+  state_file: "src/utils/plugins/dynamic_personality/status.txt"
+  update_in_background: true             # run persona update async (non-blocking)
