@@ -22,5 +22,8 @@ numpy>=1.24.0
 # Async database
 aiosqlite>=0.19.0
 
+# Orchestrator (LangGraph)
+langgraph>=0.2.0
+
 # Config
 pyyaml>=6.0

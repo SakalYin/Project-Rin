@@ -1,1 +1,1 @@
-# Core infrastructure — config, prompt, orchestration
+# Core infrastructure — config, prompt, app entry point

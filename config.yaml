@@ -6,13 +6,15 @@
 # Engine-level keys: provider, max_retries
 # Everything else is passed to the selected provider.
 llm:
-  provider: "openai_compat"              # provider to use (see src/core/llm/providers/)
+  provider: "openai_compat"              # provider to use (see src/service/llm/providers/)
   max_retries: 3                         # retry on empty LLM responses
 
   # Provider-specific (openai_compat) ─────────────────────────────────
   api_key: "not-needed"                  # llama.cpp doesn't require a real key
   model: "local-model"                   # placeholder; llama.cpp ignores this
-  temperature: 1.1                       # high for chaotic replies
+  temperature: 1.2                       # high for chaotic replies
+  frequency_penalty: 0.6                 # penalize repeated tokens (0-2, higher = less repetition)
+  presence_penalty: 0.3                  # penalize tokens already in the reply (0-2)
   timeout: 30.0                          # seconds before giving up
   # max_tokens:                          # leave unset to use server.n_predict
 
@@ -20,7 +22,7 @@ llm:
   server:
     enabled: true                        # set false to manage the server yourself
     executable: "llama.ccp/llama-server.exe"
-    model_path: "models/Qwen3-8B-Q5_K_M.gguf"
+    model_path: "models/nvidia_Llama-3.1-Nemotron-Nano-8B-v1-Q5_K_M.gguf"
     context_size: 16384                  # -c   total context window
     n_predict: 4096                      # -n   max completion tokens per reply
     gpu_layers: -1                       # -ngl (-1 = offload all layers to GPU)
@@ -32,7 +34,7 @@ llm:
 # Engine-level keys: provider, sample_rate
 # Everything else is passed to the selected provider.
 tts:
-  provider: "kokoro"                     # provider to use (see src/core/tts/providers/)
+  provider: "kokoro"                     # provider to use (see src/service/tts/providers/)
   sample_rate: 24000                     # playback sample rate
 
   # Provider-specific (kokoro) ────────────────────────────────────────
@@ -46,7 +48,7 @@ tts:
 # Engine-level keys: provider, enabled, sample_rate, silence_duration, max_duration, vad_threshold
 # Everything else is passed to the selected provider.
 stt:
-  provider: "faster_whisper"             # provider to use (see src/core/stt/providers/)
+  provider: "faster_whisper"             # provider to use (see src/service/stt/providers/)
   enabled: true                          # set false to disable voice input entirely
   sample_rate: 16000                     # recording sample rate (Whisper expects 16 kHz)
   silence_duration: 1.5                  # seconds of silence → end of utterance
@@ -61,7 +63,7 @@ stt:
 
 # ── Database ──────────────────────────────────────────────────────────
 database:
-  path: "data/chat_history.db"
+  path: "src/db/sql_db/chat_history.db"      # session-based storage
   history_limit: 20                      # past messages fed to the LLM
 
 # ── Streaming ─────────────────────────────────────────────────────────
