@@ -7,6 +7,7 @@ requiring the main LLM to output special tags.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import logging
@@ -38,16 +39,21 @@ SECTION RULES - what each section is based on:
 - relationship: from BOTH messages - how they interact together
 
 FREQUENCY - avoid unnecessary updates:
-- notes: only when user reveals new permanent facts (most messages don't!)
-- mood/impression: when deemed necessary, but avoid frequent changes
-- relationship: only if clear shift in interaction style
+- notes: only when user reveals new permanent facts/preferences/informations (most messages don't!, be mindful of what counts)
+- mood/impression: when deemed necessary depend on ai behavior in recent responses, but avoid frequent changes
+- relationship: only base on shift in interaction style between user and AI
 
-When updating sections, make sure to not overwrite existing important info.
-Try to summarize when get too long but keep previous details that may be relevants.
-
+you may add/stack more informations to each section.
+But when any of them exceed optimal capacity, summarize existing data while preserving essential context and information that are important or still relevant (such as facts). prioritize key details and maintain narrative integrity during summarization.
+Some information in the notes section may become irrelevant over time, but it should not be removed if it is still relevant to the user's identity or preferences. If a fact is no longer relevant, it can be marked as such (e.g., "previously lived in X") rather than deleted unless user explicitly state differently from those facts.
 
 Return {{}} if no updates needed (most exchanges need none).
-If updating notes, preserve existing: {{"notes": "existing fact. existing fact. NEW fact."}}
+
+Examples:
+- No update needed: {{}}
+- Single update: {{"mood": "cheerful and playful"}}
+- Preserving notes: {{"notes": "existing fact. existing fact. NEW fact."}}
+- Multiple updates: {{"impression": "user seems excited", "relationship": "growing closer through shared interests"}}
 """
 
 # Pattern to extract JSON from response
@@ -119,14 +125,21 @@ async def update_memory_from_conversation(
             log.debug("No JSON found in memory analyzer response")
             return False
 
-        updates = json.loads(json_match.group())
+        raw = json_match.group()
+        # Normalize smart/curly quotes to ASCII quotes
+        raw = raw.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+        try:
+            updates = json.loads(raw)
+        except json.JSONDecodeError:
+            # LLM sometimes returns single-quoted Python dict syntax
+            updates = ast.literal_eval(raw)
 
         if not updates:
             log.debug("Memory analyzer: no updates needed")
             return False
 
-    except json.JSONDecodeError as e:
-        log.warning("Failed to parse memory update JSON: %s", e)
+    except (json.JSONDecodeError, ValueError, SyntaxError) as e:
+        log.warning("Failed to parse memory update JSON: %s | Raw: %s", e, raw)
         return False
 
     # Apply updates

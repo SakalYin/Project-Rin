@@ -22,7 +22,7 @@ llm:
   server:
     enabled: true                        # set false to manage the server yourself
     executable: "llama.ccp/llama-server.exe"
-    model_path: "models/Llama-3.1-8B-Instruct-UD-Q4_K_XL.gguf"
+    model_path: "models/gemma-3-12b-it-UD-Q4_K_XL.gguf"
     context_size: 16384                  # -c   total context window
     n_predict: 4096                      # -n   max completion tokens per reply
     gpu_layers: -1                       # -ngl (-1 = offload all layers to GPU)
