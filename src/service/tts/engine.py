@@ -31,8 +31,8 @@ _KAOMOJI = re.compile(
 # Symbols that can't be spoken
 _UNSPEAKABLE = re.compile(r"[>:;()\[\]{}<>^_~=*#@|/\\`\"]+")
 
-# Asterisk actions like *sighs* or *winks*
-_ASTERISK_ACTIONS = re.compile(r"\*[^*]+\*")
+# Asterisk actions like *sighs* or *winks* — capture inner text
+_ASTERISK_ACTIONS = re.compile(r"\*([^*]+)\*")
 
 # Emoji pattern (covers most Unicode emoji ranges)
 _EMOJI = re.compile(
@@ -69,8 +69,8 @@ def _clean_for_speech(text: str) -> str:
     # Remove kaomoji
     text = _KAOMOJI.sub("", text)
 
-    # Remove asterisk actions like *sighs* or *winks*
-    text = _ASTERISK_ACTIONS.sub("", text)
+    # Convert asterisk actions like *sighs* → sighs (keep inner text)
+    text = _ASTERISK_ACTIONS.sub(r"\1", text)
 
     # Remove emojis
     text = _EMOJI.sub("", text)

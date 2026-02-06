@@ -71,6 +71,14 @@ class PersonaConfig:
 
 
 @dataclass
+class ScreenshotConfig:
+    """Screenshot capture configuration."""
+    enabled: bool = False
+    output_dir: str = "temp/screenshots"
+    default_monitor: int = 1  # 0 = all monitors, 1 = primary, 2+ = others
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
@@ -78,6 +86,7 @@ class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
     persona: PersonaConfig = field(default_factory=PersonaConfig)
+    screenshot: ScreenshotConfig = field(default_factory=ScreenshotConfig)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -153,9 +162,12 @@ def load_config(path: Path | None = None) -> AppConfig:
         cfg.streaming = StreamingConfig(**raw["streaming"])
     if "persona" in raw:
         cfg.persona = PersonaConfig(**raw["persona"])
+    if "screenshot" in raw:
+        cfg.screenshot = ScreenshotConfig(**raw["screenshot"])
 
     # Resolve paths
     cfg.database.path = str(PROJECT_ROOT / cfg.database.path)
     cfg.persona.state_file = str(PROJECT_ROOT / cfg.persona.state_file)
+    cfg.screenshot.output_dir = str(PROJECT_ROOT / cfg.screenshot.output_dir)
 
     return cfg

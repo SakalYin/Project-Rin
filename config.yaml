@@ -22,7 +22,8 @@ llm:
   server:
     enabled: true                        # set false to manage the server yourself
     executable: "llama.ccp/llama-server.exe"
-    model_path: "models/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+    # model_path: "models/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+    model_path: "models/Qwen3-VL-8B-Thinking-1M-UD-Q5_K_XL.gguf"
     context_size: 16384                  # -c   total context window
     n_predict: 4096                      # -n   max completion tokens per reply
     gpu_layers: -1                       # -ngl (-1 = offload all layers to GPU)
@@ -70,10 +71,19 @@ database:
 streaming:
   min_sentence_chars: 12                 # don't TTS tiny fragments
 
-# ── Dynamic Personality ─────────────────────────────────────────────────
-# AI personality state tracking (mood, impression, relationship, notes)
+
+# ╔══════════════════════════════════════════════════════════════════════╗
+# ║                     Plugins Configuration                            ║
+# ╚══════════════════════════════════════════════════════════════════════╝
+
+# Dynamic Personality: AI personality state tracking (mood, impression, relationship, notes)
 persona:
   enabled: true                          # set false to disable persona system
-  state_file: "src/utils/plugins/dynamic_personality/status.txt"
+  state_file: "src/temp/persona/status.txt"
   update_in_background: true             # run persona update async (non-blocking)
-  context_turns: 3                       # number of recent turns to analyze for memory
+  context_turns: 5                       # number of recent turns to analyze for memory
+
+screenshot:
+  enabled: false
+  output_dir: "temp/screenshots"
+  default_monitor: 1                     # 0 = all monitors, 1 = primary, 2+ = others
