@@ -21,27 +21,32 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 # Prompt for memory extraction
-_MEMORY_PROMPT = """Analyze if this exchange warrants a memory update.
+_MEMORY_PROMPT = """Analyze if these recent exchanges warrant a memory update.
 
 CURRENT MEMORY (turns since last update):
 {current_memory}
 
-LATEST EXCHANGE:
-User: {user_message}
-AI: {ai_response}
+RECENT CONVERSATION:
+{conversation}
 
 SECTION RULES - what each section is based on:
 - notes: ONLY from USER's message - facts user explicitly stated (name, hobbies, preferences)
   → AI suggestions/questions are NOT user facts. "AI asks about X" ≠ "user wants X"
   → ALWAYS preserve existing notes when updating - copy them + add new fact
 - impression: ONLY from USER's message - user's current mood/behavior
-- mood: ONLY from AI's response - AI's emotional state expressed in its reply
-- relationship: from BOTH messages - how they interact together
+- mood: ONLY from AI's response - AI's emotional state expressed in its reply, 
+- relationship: from BOTH messages - how they interact together, slight change over time based on tone/style of interaction
 
 FREQUENCY - avoid unnecessary updates:
-- notes: only when user reveals new permanent facts/preferences/informations (most messages don't!, be mindful of what counts)
+- notes: when user reveals new permanent facts/preferences/informations (be mindful of what counts, dont missed important details but also avoid trivial ones)
 - mood/impression: when deemed necessary depend on ai behavior in recent responses, but avoid frequent changes
-- relationship: only base on shift in interaction style between user and AI
+- relationship: only base on noticeable shift in interaction style between user and AI
+
+Each field should be concise:
+- notes:    max ~500–700 characters
+- impression/mood/relationship: max ~200–300 characters
+
+If the new content would make any field exceed these soft limits, you MUST summarize the entire section first (keeping all important facts), then append the new information.
 
 you may add/stack more informations to each section.
 But when any of them exceed optimal capacity, summarize existing data while preserving essential context and information that are important or still relevant (such as facts). prioritize key details and maintain narrative integrity during summarization.
@@ -51,9 +56,10 @@ Return {{}} if no updates needed (most exchanges need none).
 
 Examples:
 - No update needed: {{}}
-- Single update: {{"mood": "cheerful and playful"}}
-- Preserving notes: {{"notes": "existing fact. existing fact. NEW fact."}}
-- Multiple updates: {{"impression": "user seems excited", "relationship": "growing closer through shared interests"}}
+- Mood change: {{"mood": "cheerful and playful"}}
+- New user fact: {{"notes": "[existing notes]. [new fact about user]"}}
+- Impression shift: {{"impression": "feeling more relaxed today"}}
+- Multiple sections: {{"mood": "excited", "relationship": "bonding over shared interest"}}
 """
 
 # Pattern to extract JSON from response
@@ -76,14 +82,27 @@ def _format_memory_with_turns(status: "StatusManager") -> str:
     return "\n".join(lines) if lines else "(empty)"
 
 
+def _format_conversation(messages: list[dict[str, str]]) -> str:
+    """Format message history as conversation text."""
+    lines = []
+    for msg in messages:
+        role = "User" if msg["role"] == "user" else "AI"
+        lines.append(f"{role}: {msg['content']}")
+    return "\n".join(lines)
+
+
 async def update_memory_from_conversation(
-    user_message: str,
-    ai_response: str,
+    messages: list[dict[str, str]],
     status: StatusManager,
     llm: LLMEngine,
 ) -> bool:
     """
-    Analyze conversation and update memory via separate LLM call.
+    Analyze recent conversation turns and update memory via separate LLM call.
+
+    Args:
+        messages: Recent conversation messages (user/assistant pairs)
+        status: StatusManager instance
+        llm: LLMEngine instance
 
     Returns True if memory was updated.
     """
@@ -96,8 +115,7 @@ async def update_memory_from_conversation(
     # Build the analysis prompt
     prompt = _MEMORY_PROMPT.format(
         current_memory=current_memory,
-        user_message=user_message,
-        ai_response=ai_response,
+        conversation=_format_conversation(messages),
     )
 
     # Make LLM call (non-streaming, just get full response)
@@ -157,8 +175,7 @@ async def update_memory_from_conversation(
 
 
 async def update_memory_background(
-    user_message: str,
-    ai_response: str,
+    messages: list[dict[str, str]],
     status: StatusManager,
     llm: LLMEngine,
 ) -> None:
@@ -170,7 +187,7 @@ async def update_memory_background(
     """
     try:
         changed = await update_memory_from_conversation(
-            user_message, ai_response, status, llm
+            messages, status, llm
         )
         if changed:
             log.info("Background memory update completed")

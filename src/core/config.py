@@ -67,6 +67,7 @@ class PersonaConfig:
     enabled: bool = True
     state_file: str = "src/utils/plugins/dynamic_personality/status.txt"
     update_in_background: bool = True
+    context_turns: int = 3  # Number of recent turns to analyze for memory updates
 
 
 @dataclass

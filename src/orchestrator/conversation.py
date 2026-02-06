@@ -136,12 +136,14 @@ async def run_turn_with_window(
 
     # Update memory in background (non-blocking)
     if status and config.persona.enabled:
+        # Get recent turns for memory context (x2 for user+assistant pairs)
+        recent = await db.get_history(config.persona.context_turns * 2)
         if config.persona.update_in_background:
             asyncio.create_task(
-                update_memory_background(user_input, full_reply, status, llm)
+                update_memory_background(recent, status, llm)
             )
         else:
-            await update_memory_background(user_input, full_reply, status, llm)
+            await update_memory_background(recent, status, llm)
 
     return full_reply
 
@@ -220,12 +222,14 @@ async def run_turn_with_ui(
 
     # Update memory in background (non-blocking)
     if status and config.persona.enabled:
+        # Get recent turns for memory context (x2 for user+assistant pairs)
+        recent = await db.get_history(config.persona.context_turns * 2)
         if config.persona.update_in_background:
             asyncio.create_task(
-                update_memory_background(user_input, full_reply, status, llm)
+                update_memory_background(recent, status, llm)
             )
         else:
-            await update_memory_background(user_input, full_reply, status, llm)
+            await update_memory_background(recent, status, llm)
 
     return full_reply
 
@@ -302,11 +306,13 @@ async def run_turn(
 
     # Update memory in background (non-blocking)
     if status and config.persona.enabled:
+        # Get recent turns for memory context (x2 for user+assistant pairs)
+        recent = await db.get_history(config.persona.context_turns * 2)
         if config.persona.update_in_background:
             asyncio.create_task(
-                update_memory_background(user_input, full_reply, status, llm)
+                update_memory_background(recent, status, llm)
             )
         else:
-            await update_memory_background(user_input, full_reply, status, llm)
+            await update_memory_background(recent, status, llm)
 
     return full_reply
